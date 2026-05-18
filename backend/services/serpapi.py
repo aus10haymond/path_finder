@@ -20,8 +20,8 @@ _AUTO_ONLY_TYPES = {
 
 # If a business name contains any of these phrases it's treated as auto-only
 # unless the name also contains a home-related word.
-_CAR_NAME_PHRASES = {"auto insurance", "car insurance", "vehicle insurance", "truck insurance"}
-_HOME_NAME_WORDS = {"home", "homeowner", "homeowners", "property", "flood", "renters", "dwelling", "house"}
+_CAR_NAME_PHRASES = {"auto insurance", "car insurance", "vehicle insurance", "truck insurance", "health insurance", "motorcycle insurance", "rv insurance", "boat insurance", "atv insurance", "classic car insurance",}
+_HOME_NAME_WORDS = {"home", "homeowner", "homeowners", "property", "flood", "renters", "dwelling", "house",}
 
 
 def _is_relevant(result: dict) -> bool:
