@@ -1,0 +1,31 @@
+# Secrets — never commit these
+backend/.env
+backend/.env.*
+
+# Python virtual environment
+backend/venv/
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# SQLite job database (ephemeral, not source-controlled)
+backend/*.db
+*.db
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Docs/design files (large, not needed in deployment)
+*.pdf
+
+.claude/

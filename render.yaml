@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: path-finder
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SERPAPI_KEY
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        sync: false
+      - key: GOOGLE_SPREADSHEET_ID
+        sync: false
+      - key: OPENROUTESERVICE_API_KEY
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: RECIPIENT_EMAIL
+        sync: false
+      - key: SECRET_URL_TOKEN
+        sync: false

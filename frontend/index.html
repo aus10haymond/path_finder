@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Path Finder</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Path Finder</h1>
+    <p class="subtitle">Insurance Agent Lead Generator</p>
+
+    <form id="main-form" onsubmit="return false;">
+
+      <!-- Cities -->
+      <div class="field">
+        <label>Cities</label>
+        <div class="city-input-row">
+          <input type="text" id="city-input" placeholder="e.g. Phoenix, AZ" autocomplete="off" />
+          <button type="button" class="btn-secondary" onclick="addCity()">Add</button>
+        </div>
+        <div id="city-chips" class="chip-list"></div>
+        <p id="city-error" class="field-error" hidden>Add at least one city.</p>
+      </div>
+
+      <!-- Starting address -->
+      <div class="field">
+        <label for="start-address">Starting Address</label>
+        <input type="text" id="start-address" placeholder="e.g. 123 Main St, Phoenix, AZ" />
+        <p id="start-error" class="field-error" hidden>Starting address is required.</p>
+      </div>
+
+      <!-- Ending address -->
+      <div class="field">
+        <label for="end-address">Ending Address</label>
+        <div class="same-row">
+          <input type="text" id="end-address" placeholder="e.g. 123 Main St, Phoenix, AZ" />
+          <label class="same-label">
+            <input type="checkbox" id="same-address" onchange="toggleSameAddress()" />
+            Same as start
+          </label>
+        </div>
+      </div>
+
+      <!-- Route mode -->
+      <div class="field">
+        <label>Route Mode</label>
+        <div class="toggle-group">
+          <button type="button" class="toggle active" id="mode-per-city" onclick="setMode('per_city')">Per City</button>
+          <button type="button" class="toggle" id="mode-all-cities" onclick="setMode('all_cities')">All Cities Combined</button>
+        </div>
+      </div>
+
+      <button type="button" class="btn-primary" id="generate-btn" onclick="submitForm()">Generate</button>
+    </form>
+
+    <!-- Progress -->
+    <div id="progress-section" class="section" style="display:none">
+      <div class="spinner"></div>
+      <p id="progress-text">Starting...</p>
+    </div>
+
+    <!-- Results -->
+    <div id="results-section" class="section" style="display:none">
+      <div class="result-header">
+        <span id="result-summary"></span>
+      </div>
+      <a id="sheet-link" href="#" target="_blank" class="btn-sheet">Open Google Sheet</a>
+      <div id="route-summary"></div>
+    </div>
+
+    <!-- Error -->
+    <div id="error-section" class="section error-section" style="display:none">
+      <p id="error-text"></p>
+      <button type="button" class="btn-secondary" onclick="resetForm()">Try Again</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
