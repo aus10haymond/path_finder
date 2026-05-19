@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from services.email_sender import _build_html, _format_duration, _maps_link
+from services.email_sender import _build_html, _format_duration, _maps_link, _maps_links
 
 
 # --- _format_duration ---
@@ -24,7 +24,7 @@ class TestFormatDuration:
         assert _format_duration(7200) == "2h 0m"
 
 
-# --- _maps_link ---
+# --- _maps_link (legacy, ≤8 stops) ---
 
 class TestMapsLink:
     def _stop(self, address, city="Phoenix, AZ"):
@@ -49,8 +49,53 @@ class TestMapsLink:
         stops = [self._stop("A"), self._stop("B"), self._stop("C")]
         url = _maps_link(stops)
         assert url is not None
-        # origin=A, waypoint=B, destination=C — all should appear
         assert "A" in url and "B" in url and "C" in url
+
+
+# --- _maps_links (segmented, handles any length) ---
+
+class TestMapsLinks:
+    def _stop(self, address, city="Phoenix, AZ"):
+        return {"address": address, "city": city}
+
+    def test_returns_empty_for_single_stop(self):
+        assert _maps_links([self._stop("123 Main")]) == []
+
+    def test_returns_empty_for_no_stops(self):
+        assert _maps_links([]) == []
+
+    def test_returns_one_url_for_short_route(self):
+        stops = [self._stop(f"{i} St") for i in range(5)]
+        urls = _maps_links(stops)
+        assert len(urls) == 1
+        assert "maps/dir" in urls[0]
+
+    def test_returns_one_url_at_segment_boundary(self):
+        stops = [self._stop(f"{i} St") for i in range(9)]
+        urls = _maps_links(stops)
+        assert len(urls) == 1
+
+    def test_segments_long_route(self):
+        stops = [self._stop(f"{i} St") for i in range(20)]
+        urls = _maps_links(stops)
+        assert len(urls) > 1
+
+    def test_all_stops_covered_across_segments(self):
+        """Every stop address should appear in at least one segment URL."""
+        stops = [self._stop(f"Stop{i}") for i in range(15)]
+        urls = _maps_links(stops)
+        combined = " ".join(urls)
+        for i in range(15):
+            assert f"Stop{i}" in combined
+
+    def test_adjacent_segments_share_boundary_stop(self):
+        """Last stop of segment N should appear in segment N+1 (continuity)."""
+        stops = [self._stop(f"Stop{i}") for i in range(18)]
+        urls = _maps_links(stops)
+        assert len(urls) >= 2
+        # Stop8 (index 8) is the last in segment 1 and first in segment 2
+        assert "Stop8" in urls[0]
+        assert "Stop8" in urls[1]
 
 
 # --- _build_html ---
@@ -101,3 +146,32 @@ class TestBuildHtml:
         }
         html = _build_html(self._result(routes=routes))
         assert "All Cities Combined" in html
+
+    def test_maps_link_present_in_route_section(self):
+        routes = {
+            "Phoenix, AZ": {
+                "stop_count": 3,
+                "total_duration_seconds": 900,
+                "ordered_agents": [
+                    {"name": f"Agent {i}", "address": f"{i} Main St", "city": "Phoenix, AZ"}
+                    for i in range(3)
+                ],
+            }
+        }
+        html = _build_html(self._result(routes=routes))
+        assert "maps/dir" in html
+
+    def test_segmented_maps_links_for_long_route(self):
+        routes = {
+            "Phoenix, AZ": {
+                "stop_count": 18,
+                "total_duration_seconds": 3600,
+                "ordered_agents": [
+                    {"name": f"Agent {i}", "address": f"{i} Main St", "city": "Phoenix, AZ"}
+                    for i in range(18)
+                ],
+            }
+        }
+        html = _build_html(self._result(routes=routes))
+        # Multiple Maps links expected for an 18-stop route
+        assert html.count("maps/dir") >= 2

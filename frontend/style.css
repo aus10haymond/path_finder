@@ -346,6 +346,24 @@ input[type="text"]:focus {
   margin-top: 12px;
 }
 
+/* Google Maps navigation button */
+.btn-maps {
+  display: inline-block;
+  background: #1a73e8;
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  margin: 0 6px 8px 0;
+  transition: background 0.15s;
+}
+
+.btn-maps:hover { background: #1558b0; }
+
+.maps-links { margin-bottom: 8px; }
+
 /* Collapsible stop list */
 .stop-hidden { display: none; }
 

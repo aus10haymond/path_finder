@@ -10,6 +10,9 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 
+_MAPS_SEGMENT = 9  # Google Maps handles up to ~9 stops reliably in a /dir/ URL
+
+
 def _maps_link(stops: list[dict]) -> str | None:
     """Build a Google Maps directions URL for up to 8 stops."""
     if len(stops) > 8:
@@ -27,6 +30,35 @@ def _maps_link(stops: list[dict]) -> str | None:
     return url
 
 
+def _maps_links(stops: list[dict]) -> list[str]:
+    """
+    Return one or more Google Maps /dir/ URLs covering all stops.
+    For routes longer than _MAPS_SEGMENT, splits into overlapping segments
+    (each segment shares its last stop with the next segment's first stop
+    so the overall route is continuous).
+    Returns [] for fewer than 2 stops.
+    """
+    if len(stops) < 2:
+        return []
+
+    def _seg_url(chunk: list[dict]) -> str:
+        parts = [
+            quote(f"{a.get('address', '')}, {a.get('city', '')}".strip(", "))
+            for a in chunk
+        ]
+        return f"https://www.google.com/maps/dir/{'/'.join(parts)}"
+
+    if len(stops) <= _MAPS_SEGMENT:
+        return [_seg_url(stops)]
+
+    urls: list[str] = []
+    i = 0
+    while i < len(stops) - 1:
+        urls.append(_seg_url(stops[i: i + _MAPS_SEGMENT]))
+        i += _MAPS_SEGMENT - 1
+    return urls
+
+
 def _format_duration(seconds: int) -> str:
     h, m = divmod(seconds // 60, 60)
     if h:
@@ -38,7 +70,7 @@ def _build_route_section(key: str, route: dict) -> str:
     label = "All Cities Combined" if key == "all" else key
     stops = route.get("ordered_agents", [])
     duration = _format_duration(route.get("total_duration_seconds", 0))
-    maps_url = _maps_link(stops)
+    urls = _maps_links(stops)
 
     rows = ""
     for i, stop in enumerate(stops, 1):
@@ -49,14 +81,21 @@ def _build_route_section(key: str, route: dict) -> str:
           <td style="padding:6px 8px;border-bottom:1px solid #eee;">{stop.get('address','')}</td>
         </tr>"""
 
-    maps_btn = ""
-    if maps_url:
-        maps_btn = f'<p><a href="{maps_url}" style="color:#1a73e8;">Open in Google Maps ({len(stops)} stops)</a></p>'
+    maps_html = ""
+    if len(urls) == 1:
+        maps_html = f'<p><a href="{urls[0]}" style="color:#1a73e8;">Open in Google Maps ({len(stops)} stops)</a></p>'
+    elif len(urls) > 1:
+        stride = _MAPS_SEGMENT - 1
+        links = " &nbsp;·&nbsp; ".join(
+            f'<a href="{url}" style="color:#1a73e8;">Stops {idx * stride + 1}–{min((idx + 1) * stride + 1, len(stops))}</a>'
+            for idx, url in enumerate(urls)
+        )
+        maps_html = f'<p style="margin:0 0 8px;">Google Maps: {links}</p>'
 
     return f"""
     <h3 style="margin:24px 0 8px;">{label}</h3>
     <p style="margin:0 0 8px;color:#555;">{route['stop_count']} stops &nbsp;·&nbsp; Est. drive time: {duration}</p>
-    {maps_btn}
+    {maps_html}
     <table style="border-collapse:collapse;width:100%;font-size:14px;">
       <thead>
         <tr style="background:#f5f5f5;">
