@@ -11,6 +11,10 @@ logger = logging.getLogger(__name__)
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 ORS_OPTIMIZE_URL = "https://api.openrouteservice.org/optimization"
 
+BATCH_SIZE = 48          # ORS optimization limit per request
+CLUSTER_THRESHOLD = 150  # stop count that triggers geographic clustering
+STOPS_PER_CLUSTER = 40   # target cluster size (keeps each cluster under BATCH_SIZE)
+
 
 async def geocode_address(session: aiohttp.ClientSession, address: str) -> tuple[float, float] | None:
     """Returns (longitude, latitude) or None if geocoding fails."""
@@ -55,6 +59,88 @@ async def geocode_agents(agents: list[dict]) -> None:
         await asyncio.gather(*[_geocode_agent(session, semaphore, a) for a in agents])
 
 
+# ---------------------------------------------------------------------------
+# Geographic clustering helpers (used for 150+ stops)
+# ---------------------------------------------------------------------------
+
+def _dist2(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Squared Euclidean distance between two (lng, lat) points."""
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
+
+def _kmeans_cluster(
+    stops: list[tuple[float, float]],
+    k: int,
+    iterations: int = 15,
+) -> list[list[int]]:
+    """
+    K-means clustering on (lng, lat) stop coordinates.
+    Returns list of groups, each containing global stop indices.
+    Initialises centroids spread evenly by longitude for deterministic results.
+    """
+    n = len(stops)
+    k = min(k, n)
+
+    # Spread initial centroids evenly across longitude range
+    sorted_by_lng = sorted(range(n), key=lambda i: stops[i][0])
+    step = max(1, n // k)
+    centroids: list[tuple[float, float]] = [stops[sorted_by_lng[i * step]] for i in range(k)]
+
+    clusters: list[list[int]] = []
+    for _ in range(iterations):
+        clusters = [[] for _ in range(k)]
+        for i, stop in enumerate(stops):
+            nearest = min(range(k), key=lambda c: _dist2(stop, centroids[c]))
+            clusters[nearest].append(i)
+
+        new_centroids: list[tuple[float, float]] = []
+        for c in range(k):
+            if clusters[c]:
+                lngs = [stops[i][0] for i in clusters[c]]
+                lats = [stops[i][1] for i in clusters[c]]
+                new_centroids.append((sum(lngs) / len(lngs), sum(lats) / len(lats)))
+            else:
+                new_centroids.append(centroids[c])
+
+        if new_centroids == centroids:
+            break
+        centroids = new_centroids
+
+    return [c for c in clusters if c]
+
+
+def _chain_clusters(
+    clusters: list[list[int]],
+    stops: list[tuple[float, float]],
+    start: tuple[float, float],
+) -> list[list[int]]:
+    """
+    Order clusters using greedy nearest-neighbour from the start point.
+    Returns clusters in visitation order.
+    """
+    centroids = []
+    for c in clusters:
+        lngs = [stops[i][0] for i in c]
+        lats = [stops[i][1] for i in c]
+        centroids.append((sum(lngs) / len(lngs), sum(lats) / len(lats)))
+
+    ordered: list[list[int]] = []
+    remaining = list(range(len(clusters)))
+    current = start
+
+    while remaining:
+        nearest = min(remaining, key=lambda i: _dist2(current, centroids[i]))
+        ordered.append(clusters[nearest])
+        current = centroids[nearest]
+        remaining.remove(nearest)
+
+    return ordered
+
+
+# ---------------------------------------------------------------------------
+# ORS optimization
+# ---------------------------------------------------------------------------
+
 async def _optimize_batch(
     session: aiohttp.ClientSession,
     start: tuple[float, float],
@@ -98,6 +184,19 @@ async def _optimize_batch(
     return ordered, int(duration)
 
 
+async def _optimize_cluster(
+    session: aiohttp.ClientSession,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    global_indices: list[int],
+    all_stops: list[tuple[float, float]],
+) -> tuple[list[int], int]:
+    """Optimize one geographic cluster. Maps local ORS indices back to global stop indices."""
+    cluster_stops = [all_stops[i] for i in global_indices]
+    local_ordered, duration = await _optimize_batch(session, start, end, cluster_stops, 0)
+    return [global_indices[li] for li in local_ordered], duration
+
+
 async def optimize_route(
     start: tuple[float, float],
     end: tuple[float, float],
@@ -105,22 +204,40 @@ async def optimize_route(
 ) -> tuple[list[int], int]:
     """
     Returns (ordered_stop_indices, total_duration_seconds).
-    Handles batching automatically for > 48 stops.
+
+    Strategy by stop count:
+    - <= 48:  single ORS batch
+    - 49-150: sequential batches (existing behaviour)
+    - 150+:   k-means geographic clustering → per-cluster ORS → greedy cluster chaining
     """
     if not stops:
         return [], 0
 
-    BATCH_SIZE = 48
     async with aiohttp.ClientSession() as session:
         if len(stops) <= BATCH_SIZE:
             return await _optimize_batch(session, start, end, stops, 0)
 
-        # Split into batches, optimize each independently, concatenate
-        all_ordered: list[int] = []
+        if len(stops) <= CLUSTER_THRESHOLD:
+            # Sequential batching for mid-range counts
+            all_ordered: list[int] = []
+            total_duration = 0
+            for offset in range(0, len(stops), BATCH_SIZE):
+                batch = stops[offset: offset + BATCH_SIZE]
+                ordered, duration = await _optimize_batch(session, start, end, batch, offset)
+                all_ordered.extend(ordered)
+                total_duration += duration
+            return all_ordered, total_duration
+
+        # Geographic clustering for large stop counts
+        k = max(2, len(stops) // STOPS_PER_CLUSTER)
+        logger.info("Clustering %d stops into %d geographic groups", len(stops), k)
+        clusters = _kmeans_cluster(stops, k)
+        clusters = _chain_clusters(clusters, stops, start)
+
+        all_ordered = []
         total_duration = 0
-        for offset in range(0, len(stops), BATCH_SIZE):
-            batch = stops[offset: offset + BATCH_SIZE]
-            ordered, duration = await _optimize_batch(session, start, end, batch, offset)
+        for cluster_indices in clusters:
+            ordered, duration = await _optimize_cluster(session, start, end, cluster_indices, stops)
             all_ordered.extend(ordered)
             total_duration += duration
         return all_ordered, total_duration
@@ -130,7 +247,7 @@ async def build_routes(request: GenerateRequest, agents: list[dict]) -> dict[str
     """
     Geocode start/end and optimize routes.
     Returns dict keyed by city name (or "all") with ordered_agents, stop_count, total_duration_seconds.
-    Falls back to unoptimized order and logs a warning if ORS fails.
+    Raises on failure so worker.py can surface the error to the user.
     """
     if not settings.openrouteservice_api_key:
         logger.warning("OPENROUTESERVICE_API_KEY not configured — skipping route optimization")
@@ -186,5 +303,5 @@ async def build_routes(request: GenerateRequest, agents: list[dict]) -> dict[str
             return result
 
     except Exception as e:
-        logger.warning("Route optimization failed, returning unoptimized: %s", e)
-        return {}
+        logger.warning("Route optimization failed: %s", e)
+        raise
