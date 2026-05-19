@@ -1,5 +1,8 @@
 # path_finder Wiki Log
 
+## [2026-05-19] fix | Suite/unit stripping for unresolvable addresses
+Added `_strip_suite()` as a third geocoding tier in `routing.py`. When both ORS and Nominatim fail on a full address, the function strips suite/unit designators (`Ste`, `Suite`, `STE`, `Bldg`, `Building`, `Unit`, `#`, etc.) via regex and retries Nominatim with the simplified street address. This resolved 13 misses in a 94-agent run — all were suite-qualified addresses in Gilbert and Mesa that Nominatim couldn't match verbatim but resolved cleanly at the street level.
+
 ## [2026-05-19] fix | Nominatim fallback for ORS geocoding misses
 ORS geocoding (`/geocode/search`) returned no results for valid US addresses (e.g. "1679 E Beretta Pl, Chandler, AZ 85286"), causing route optimization to abort. Added `_nominatim_geocode()` as a fallback: `geocode_address()` now tries ORS first, then Nominatim (OpenStreetMap) on a miss. A module-level `asyncio.Lock` serializes Nominatim calls with a 1-second gap to comply with Nominatim's usage policy. Fixes both start-address failures (which were fatal) and improves agent geocoding coverage (9 misses in the triggering run).
 

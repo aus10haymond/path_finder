@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 import aiohttp
 
@@ -16,6 +17,18 @@ NOMINATIM_HEADERS = {"User-Agent": "path-finder-lead-tool/1.0"}
 BATCH_SIZE = 48          # ORS optimization limit per request
 CLUSTER_THRESHOLD = 150  # stop count that triggers geographic clustering
 STOPS_PER_CLUSTER = 40   # target cluster size (keeps each cluster under BATCH_SIZE)
+
+
+# Matches suite/unit designators and everything after them up to the next comma.
+# Handles: Ste 101, Suite 129, STE 120, Bldg 6 Suite 129, #110, Unit 104 Ste 1
+_SUITE_RE = re.compile(
+    r"\s*,?\s*(?:Ste|Suite|STE|Bldg|Building|Unit|Apt|Apartment|Fl|Floor|#)\b.*?(?=,|$)",
+    re.IGNORECASE,
+)
+
+
+def _strip_suite(address: str) -> str:
+    return _SUITE_RE.sub("", address).strip().strip(",").strip()
 
 
 _nominatim_lock = asyncio.Lock()
@@ -60,6 +73,14 @@ async def geocode_address(session: aiohttp.ClientSession, address: str) -> tuple
         logger.debug("ORS geocoding failed for '%s': %s — trying Nominatim", address, e)
 
     coords = await _nominatim_geocode(session, address)
+    if coords is not None:
+        return coords
+
+    stripped = _strip_suite(address)
+    if stripped != address:
+        logger.debug("Retrying Nominatim without suite for '%s'", address)
+        coords = await _nominatim_geocode(session, stripped)
+
     if coords is None:
         logger.warning("No geocode result for: %s", address)
     return coords
