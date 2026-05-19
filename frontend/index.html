@@ -59,6 +59,28 @@
     <div id="progress-section" class="section" style="display:none">
       <div class="spinner"></div>
       <p id="progress-text">Starting...</p>
+      <div class="progress-steps">
+        <div class="step" id="step-fetch">
+          <span class="step-icon"></span>
+          <span class="step-label">Finding agents</span>
+        </div>
+        <div class="step" id="step-geocode">
+          <span class="step-icon"></span>
+          <span class="step-label">Geocoding addresses</span>
+        </div>
+        <div class="step" id="step-sheets">
+          <span class="step-icon"></span>
+          <span class="step-label">Writing to Google Sheet</span>
+        </div>
+        <div class="step" id="step-route">
+          <span class="step-icon"></span>
+          <span class="step-label">Optimizing route</span>
+        </div>
+        <div class="step" id="step-email">
+          <span class="step-icon"></span>
+          <span class="step-label">Sending email</span>
+        </div>
+      </div>
     </div>
 
     <!-- Results -->
@@ -66,6 +88,7 @@
       <div class="result-header">
         <span id="result-summary"></span>
       </div>
+      <p id="failed-cities-warning" class="route-warning" hidden></p>
       <a id="sheet-link" href="#" target="_blank" class="btn-sheet">Open Google Sheet</a>
       <div id="route-summary"></div>
     </div>
@@ -77,6 +100,7 @@
     </div>
   </div>
 
+  <script>window.APP_TOKEN = "{{ app_token }}";</script>
   <script src="app.js"></script>
 </body>
 </html>

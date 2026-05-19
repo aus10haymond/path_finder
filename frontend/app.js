@@ -1,9 +1,19 @@
 const BACKEND_URL = "";
-const SECRET_URL_TOKEN = "3172be0f8549adc6";
+const SECRET_URL_TOKEN = window.APP_TOKEN || "";
 
 const cities = [];
 let routeMode = "per_city";
 let pollInterval = null;
+let activeSocket = null;
+
+// Progress step config (ordered to match the job pipeline)
+const STEPS = [
+  { id: "step-fetch",   keywords: ["fetching", "starting"] },
+  { id: "step-geocode", keywords: ["geocoding"] },
+  { id: "step-sheets",  keywords: ["writing"] },
+  { id: "step-route",   keywords: ["optimizing"] },
+  { id: "step-email",   keywords: ["sending", "done"] },
+];
 
 // --- City chips ---
 
@@ -95,6 +105,7 @@ async function submitForm() {
 
   setLoading(true);
   showSection("progress");
+  resetSteps();
 
   try {
     const resp = await fetch(`${BACKEND_URL}/api/generate?token=${SECRET_URL_TOKEN}`, {
@@ -119,15 +130,97 @@ async function submitForm() {
     }
 
     const { job_id } = await resp.json();
-    startPolling(job_id);
+    connectWebSocket(job_id);
   } catch (err) {
     showError("Could not reach the server. Make sure the backend is running.");
   }
 }
 
-// --- Polling ---
+// --- WebSocket (primary) ---
+
+function connectWebSocket(jobId) {
+  if (activeSocket) {
+    activeSocket.close();
+    activeSocket = null;
+  }
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/api/ws/${jobId}`);
+  activeSocket = ws;
+
+  ws.onmessage = event => {
+    let data;
+    try { data = JSON.parse(event.data); } catch { return; }
+
+    if (data.ping) return; // keepalive, ignore
+
+    if (data.progress) {
+      document.getElementById("progress-text").textContent = data.progress;
+      updateStep(data.progress);
+    }
+
+    if (data.status === "complete") {
+      ws.close();
+      activeSocket = null;
+      showResults(data.result);
+      if (navigator.vibrate) navigator.vibrate(200);
+    } else if (data.status === "failed") {
+      ws.close();
+      activeSocket = null;
+      showError(data.error || "Job failed. Please try again.");
+    }
+  };
+
+  ws.onerror = () => {
+    activeSocket = null;
+    startPolling(jobId); // fall back to polling
+  };
+
+  ws.onclose = event => {
+    if (activeSocket === ws) activeSocket = null;
+    // Unexpected close before terminal state → fall back to polling
+    if (!event.wasClean) startPolling(jobId);
+  };
+}
+
+// --- Progress steps ---
+
+function resetSteps() {
+  STEPS.forEach(s => {
+    const el = document.getElementById(s.id);
+    el.classList.remove("active", "done");
+  });
+}
+
+function updateStep(progressText) {
+  const text = progressText.toLowerCase();
+  let activeIdx = -1;
+  for (let i = 0; i < STEPS.length; i++) {
+    if (STEPS[i].keywords.some(kw => text.includes(kw))) {
+      activeIdx = i;
+      break;
+    }
+  }
+  if (activeIdx < 0) return;
+
+  STEPS.forEach((s, i) => {
+    const el = document.getElementById(s.id);
+    if (i < activeIdx) {
+      el.classList.add("done");
+      el.classList.remove("active");
+    } else if (i === activeIdx) {
+      el.classList.add("active");
+      el.classList.remove("done");
+    } else {
+      el.classList.remove("active", "done");
+    }
+  });
+}
+
+// --- Polling fallback ---
 
 function startPolling(jobId) {
+  if (pollInterval) return; // already polling
   pollInterval = setInterval(() => pollStatus(jobId), 4000);
 }
 
@@ -139,14 +232,17 @@ async function pollStatus(jobId) {
 
     if (data.progress) {
       document.getElementById("progress-text").textContent = data.progress;
+      updateStep(data.progress);
     }
 
     if (data.status === "complete") {
       clearInterval(pollInterval);
+      pollInterval = null;
       showResults(data.result);
       if (navigator.vibrate) navigator.vibrate(200);
     } else if (data.status === "failed") {
       clearInterval(pollInterval);
+      pollInterval = null;
       showError(data.error || "Job failed. Please try again.");
     }
   } catch {
@@ -160,8 +256,24 @@ function showResults(result) {
   setLoading(false);
   showSection("results");
 
+  // Mark all steps done
+  STEPS.forEach(s => {
+    const el = document.getElementById(s.id);
+    el.classList.add("done");
+    el.classList.remove("active");
+  });
+
   const summary = `${result.city_count} ${result.city_count === 1 ? "city" : "cities"} · ${result.agent_count} agents found`;
   document.getElementById("result-summary").textContent = summary;
+
+  // Failed cities warning
+  const failedEl = document.getElementById("failed-cities-warning");
+  if (result.failed_cities && result.failed_cities.length > 0) {
+    failedEl.textContent = `Could not retrieve agents for: ${result.failed_cities.join(", ")}`;
+    failedEl.hidden = false;
+  } else {
+    failedEl.hidden = true;
+  }
 
   const link = document.getElementById("sheet-link");
   link.href = result.sheet_url;
@@ -172,7 +284,12 @@ function showResults(result) {
   const routes = result.routes || {};
   const keys = Object.keys(routes);
 
-  if (keys.length === 0) return;
+  if (keys.length === 0) {
+    if (result.route_warning) {
+      routeContainer.innerHTML = `<p class="route-warning">${result.route_warning}</p>`;
+    }
+    return;
+  }
 
   keys.forEach(key => {
     const route = routes[key];
@@ -182,21 +299,41 @@ function showResults(result) {
       ? `${Math.floor(mins / 60)}h ${mins % 60}m`
       : `${mins}m`;
 
-    const stops = (route.ordered_agents || []).map((a, i) => `
-      <li>
-        <span class="stop-num">${i + 1}.</span>
-        <span>${a.name} — ${a.address}</span>
-      </li>`).join("");
-
     routeContainer.innerHTML += `
       <div class="route-block">
         <h3>${label}</h3>
         <p class="route-meta">${route.stop_count} stops · Est. ${duration} driving</p>
-        <ul class="stop-list">${stops}</ul>
+        ${renderStopList(route.ordered_agents || [])}
       </div>`;
   });
 
+  if (result.route_warning) {
+    routeContainer.innerHTML += `<p class="route-warning">${result.route_warning}</p>`;
+  }
+
   routeContainer.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderStopList(stops) {
+  const PREVIEW = 8;
+  let html = '<ul class="stop-list">';
+  stops.forEach((a, i) => {
+    const hidden = i >= PREVIEW ? ' class="stop-hidden"' : "";
+    html += `<li${hidden}>
+      <span class="stop-num">${i + 1}.</span>
+      <span>${a.name} — ${a.address}</span>
+    </li>`;
+  });
+  html += "</ul>";
+  if (stops.length > PREVIEW) {
+    html += `<button class="btn-link" onclick="expandStops(this)">Show all ${stops.length} stops</button>`;
+  }
+  return html;
+}
+
+function expandStops(btn) {
+  btn.previousElementSibling.querySelectorAll(".stop-hidden").forEach(el => el.classList.remove("stop-hidden"));
+  btn.remove();
 }
 
 // --- Error ---
@@ -208,8 +345,11 @@ function showError(msg) {
 }
 
 function resetForm() {
+  if (activeSocket) { activeSocket.close(); activeSocket = null; }
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
   showSection("none");
   setLoading(false);
+  resetSteps();
 }
 
 // --- Helpers ---

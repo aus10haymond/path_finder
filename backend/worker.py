@@ -20,12 +20,18 @@ async def run_job(job_id: str, request: GenerateRequest):
         # --- Phase 2: data acquisition ---
         all_agents: list[dict] = []
         city_counts: dict[str, int] = {}
+        failed_cities: list[str] = []
         for i, city in enumerate(request.cities, 1):
             await update_job(job_id, progress=f"Fetching agents in {city}... ({i}/{len(request.cities)})")
-            city_agents = await fetch_agents(city)
-            city_counts[city] = len(city_agents)
-            all_agents.extend(city_agents)
-            logger.info("Fetched %d agents for %s", len(city_agents), city)
+            try:
+                city_agents = await fetch_agents(city)
+                city_counts[city] = len(city_agents)
+                all_agents.extend(city_agents)
+                logger.info("Fetched %d agents for %s", len(city_agents), city)
+            except Exception as e:
+                logger.warning("Failed to fetch agents for %s (skipping): %s", city, e)
+                failed_cities.append(city)
+                city_counts[city] = 0
 
         agents = deduplicate(all_agents)
         logger.info("Total after dedup: %d agents across %d cities", len(agents), len(request.cities))
@@ -41,8 +47,14 @@ async def run_job(job_id: str, request: GenerateRequest):
 
         # --- Phase 4b: route optimization ---
         await update_job(job_id, progress="Optimizing driving route...")
-        routes = await build_routes(request, agents)
-        logger.info("Routes built: %s", list(routes.keys()))
+        route_warning: str | None = None
+        try:
+            routes = await build_routes(request, agents)
+            logger.info("Routes built: %s", list(routes.keys()))
+        except Exception as e:
+            logger.warning("Route optimization failed, continuing without routes: %s", e)
+            routes = {}
+            route_warning = "Route optimization failed — agents are listed in search order."
 
         # Build per-route summary (duration in minutes, rounded)
         route_summary: dict[str, dict] = {}
@@ -66,7 +78,9 @@ async def run_job(job_id: str, request: GenerateRequest):
             "agent_count": len(agents),
             "cities": request.cities,
             "city_counts": city_counts,
+            "failed_cities": failed_cities,
             "routes": route_summary,
+            "route_warning": route_warning,
         }
 
         # --- Phase 5: email ---

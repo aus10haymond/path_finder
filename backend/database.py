@@ -1,4 +1,8 @@
+import json
+
 import aiosqlite
+
+import ws_manager
 
 DB_PATH = "jobs.db"
 
@@ -35,6 +39,21 @@ async def update_job(id: str, **fields):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(f"UPDATE jobs SET {assignments} WHERE id = ?", values)
         await db.commit()
+
+    # Push live update to any connected WebSocket listener
+    result = None
+    raw = fields.get("result_json")
+    if raw:
+        try:
+            result = json.loads(raw)
+        except Exception:
+            pass
+    await ws_manager.push(id, {
+        "status": fields.get("status", "running"),
+        "progress": fields.get("progress"),
+        "result": result,
+        "error": fields.get("error"),
+    })
 
 
 async def get_job(id: str) -> dict | None:
