@@ -2,88 +2,101 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## What this is
 
-**Path Finder** (Insurance Agent Lead Finder) is a personal-use tool for a damage restoration company owner to find insurance agents across multiple cities, organize them into a Google Sheet, optimize a driving route to visit them, and email the results. The full system spec is in `insurance_agent_system_architecture.md`.
+A personal-use lead generation tool for a damage restoration company owner. Given a list of cities, it finds local insurance agents via SerpApi, deduplicates by `place_id` and address, writes results to a Google Sheet, optimizes a driving route via OpenRouteService, and sends an email summary via SendGrid. Mobile-first single-page frontend (vanilla JS) polling a FastAPI async backend. Job state persists in SQLite. Phase 1 MVP is complete and working; Phases 2–4 are not yet started.
 
-This project is currently in the **architecture/design phase** — no source code exists yet. The reference documents are:
-- `insurance_agent_system_architecture.md` — full system design
-- `insurance_agent_system_architecture.pdf` / `insurance_agent_diagrams.pdf` — visual diagrams
+## Commands
 
-## Planned Stack
+```bash
+# Install dependencies
+cd backend
+pip install -r requirements.txt
 
-| Layer | Choice |
-|---|---|
-| Backend | Python + FastAPI |
-| Frontend | React (or plain HTML/CSS/JS) |
-| Job queue | `asyncio` (or Celery + Redis if needed) |
-| Database | SQLite (job tracking only) |
-| Hosting | Vercel (frontend), Railway/Render (backend) |
+# Start the backend (from project root)
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+# Open the frontend
+# Open frontend/index.html in a browser, or serve statically
+```
 
 ## Architecture
 
 ```
-[Mobile Web App]
-      |
-      v
-[FastAPI Backend]
-      |
-      |---> [Data Acquisition Layer]   → agent data (Google Places / Outscraper / SerpApi)
-      |---> [Google Sheets API v4]     → organizes results into spreadsheet
-      |---> [Route Optimization API]   → OpenRouteService or Google Maps Routes API
-      └---> [Gmail API / SendGrid]     → email notification on completion
+frontend/index.html + app.js
+        |  POST /api/generate
+        v
+backend/routes/generate.py   — rate limiting (IP-based, 300s cooldown), creates job in SQLite
+        |
+        v
+backend/worker.py            — background async job orchestration
+        |
+        |---> services/serpapi.py    — search + auto/vehicle insurance filter + dedup by place_id
+        |---> services/sheets.py     — Google Sheets API v4 write (one sheet per run, tabs per city)
+        |---> services/routing.py    — geocoding (aiohttp) + OpenRouteService route optimization
+        └---> services/email_sender.py — SendGrid email notification
 ```
 
-**Key API endpoints (to build):**
-```
-POST /api/generate        — start a job; returns job_id immediately
-GET  /api/status/{job_id} — poll for progress
-GET  /api/jobs            — list past jobs
-```
+Jobs run in the background. Frontend polls `GET /api/status/{job_id}` every 4 seconds for progress.
 
-Jobs run in the background. The frontend polls `/api/status/{job_id}` (or uses WebSockets) for progress.
+## Data flow
 
-## Data Flow
+1. User submits cities + start/end addresses via web form
+2. Backend creates background job, returns `job_id`
+3. Worker: SerpApi search per city → filter (exclude auto-only insurers) → deduplicate by `place_id` → write Google Sheet → optimize route → send email
+4. Frontend shows progress and final links
 
-1. User submits cities + start/end addresses + route mode via the web app
-2. Backend creates a background job and returns `job_id`
-3. Worker fetches agents per city → deduplicates → writes Google Sheet → optimizes route → sends email
-4. Frontend polls status; shows "Done" with links when complete
+## Google Sheet structure
 
-**Google Sheet structure:**
 - One workbook per run: `"Insurance Agents — [Date]"`
 - Tabs: `"All Cities"` (master) + one tab per city
 - Columns: `Agent Name | Business Name | Address | City | Phone | Website | Rating | Source`
 
-## Key Design Decisions (unresolved)
+## Environment variables
 
-These choices affect implementation — confirm before building each component:
-
-1. **Data source:** Outscraper (easiest, ~$2–15/run) vs Google Places API (~$5–25/run, more control) vs SerpApi (free tier, 100 searches/month)
-2. **Route optimizer:** OpenRouteService (free, 50 stops/request) vs Google Maps Routes API (25 stops, chains, more accurate)
-3. **Email:** Gmail API (uses existing Gmail account) vs SendGrid (100 free/day)
-4. **Frontend:** Single-page no-auth (secret URL as access control) vs history/saved cities
-
-## Environment Variables
-
-All API keys must be stored as env vars — never in code:
-- `GOOGLE_SERVICE_ACCOUNT_JSON` — Google Sheets + Gmail
-- `OUTSCRAPER_API_KEY` / `SERPAPI_KEY` / `GOOGLE_PLACES_API_KEY` — data source
-- `OPENROUTESERVICE_API_KEY` / `GOOGLE_MAPS_API_KEY` — route optimizer
+All in `.env` — never commit:
+- `GOOGLE_SERVICE_ACCOUNT_JSON` — Google Sheets + Gmail service account
+- `SERPAPI_KEY` — SerpApi search API
+- `OPENROUTESERVICE_API_KEY` — route optimization
+- `SENDGRID_API_KEY` — email delivery
 - `RECIPIENT_EMAIL` — where to send results
 
-## Large City Handling
+## Large city handling
 
-For large cities, Google Places returns max 20 results per call. Use geo-tiling:
-1. Get city bounding box
-2. Divide into overlapping search circles
-3. Search each circle, merge, deduplicate by place ID
+For large cities, use geo-tiling: get city bounding box → divide into overlapping search circles → search each circle → merge and deduplicate by `place_id`. For 150+ route stops: cluster geographically, optimize within clusters, chain clusters in order.
 
-For 150+ route stops: cluster geographically (k-means), optimize within clusters, chain clusters in order.
+## Key files
 
-## Development Phases
+| Task | File |
+|---|---|
+| Background job orchestration | `backend/worker.py` |
+| Insurance agent search + filtering | `backend/services/serpapi.py` |
+| Google Sheets write | `backend/services/sheets.py` |
+| Geocoding + route optimization | `backend/services/routing.py` |
+| Email notification | `backend/services/email_sender.py` |
+| Job creation + rate limiting | `backend/routes/generate.py` |
+| Job status polling | `backend/routes/status.py` |
+| Frontend UI | `frontend/index.html` + `frontend/app.js` |
+| Pydantic models | `backend/models.py` |
+| SQLite job tracking | `backend/database.py` |
+| Settings | `backend/config.py` |
+| Full system design | `insurance_agent_system_architecture.md` |
 
-- **Phase 1 (MVP):** FastAPI + one data source + Google Sheets + email + basic frontend
-- **Phase 2:** Route optimization (per-city and all-cities modes)
-- **Phase 3:** Real-time progress, multiple data sources with fallback, mobile UI polish
+## Development phases
+
+- **Phase 1 (MVP):** ✅ Complete — FastAPI + SerpApi + Google Sheets + email + basic frontend
+- **Phase 2:** Route optimization enhancements (per-city and all-cities modes)
+- **Phase 3:** Real-time progress (WebSocket), multiple data source fallback, mobile UI polish
 - **Phase 4 (optional):** Run history, agent filtering, scheduling
+
+## Wiki
+
+This project has a wiki at `path_finder/wiki/`. Read `path_finder/wiki/SCHEMA.md` before any wiki operation.
+
+**Directories:** `runs/` (per-run results), `config/` (API decisions, rate limits), `findings/` (data quality patterns, dedup behavior).
+
+**After completing work in this project:**
+- Update `wiki/roadmap.md` — mark completed phases/tasks Done, update the Next Step pointer
+- Update `wiki/backlog.md` — close resolved issues, add newly discovered ones
+- Append to `wiki/log.md`
+- Update `Projects/wiki/projects/path_finder.md` if a threshold event occurred (new data source or route optimizer, pipeline phase completed, critical bug found or resolved, architecture changed). See `wiki/SCHEMA.md` for the full trigger list.
