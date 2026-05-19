@@ -1,5 +1,8 @@
 # path_finder Wiki Log
 
+## [2026-05-19] feat | Test mode UI + README
+Added `?test=1` query-param support to `frontend/app.js`: when present, posts to `/api/test` instead of `/api/generate` and renders an amber "TEST MODE" banner. Token is still appended automatically. Created `README.md` at project root covering setup, env vars, test mode, and phase status.
+
 ## [2026-05-19] feat+fix | /api/test endpoint; Starlette Python 3.14 TemplateResponse fix
 Added `POST /api/test` route (`backend/routes/test_route.py`) — runs the full pipeline against `TEST_GOOGLE_SPREADSHEET_ID` and `TEST_RECIPIENT_EMAIL`, bypasses the 300s IP rate limit, prefixes email subject with `[TEST]`, returns `{"job_id": ..., "test_mode": true}`. Threaded `test_mode` as an explicit bool param through `run_job`, `create_and_populate_sheet`, and `send_results_email` (safe for concurrent jobs, no global state mutation). Fixed Render deploy 500: `TemplateResponse` call in `main.py` updated to modern Starlette keyword-argument API (`request=`, `name=`, `context=`) — old positional form caused Jinja2 LRU cache `TypeError: unhashable type: dict` on Python 3.14.
 

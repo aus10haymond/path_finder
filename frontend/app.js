@@ -1,6 +1,16 @@
 const BACKEND_URL = "";
 const SECRET_URL_TOKEN = window.APP_TOKEN || "";
 
+const _params = new URLSearchParams(location.search);
+const TEST_MODE = _params.get("test") === "1";
+
+if (TEST_MODE) {
+  const banner = document.createElement("div");
+  banner.textContent = "TEST MODE — using test sheet & test email";
+  banner.style.cssText = "background:#b45309;color:#fff;text-align:center;padding:8px;font-weight:600;font-size:14px;letter-spacing:.5px;";
+  document.body.prepend(banner);
+}
+
 const cities = [];
 let routeMode = "per_city";
 let pollInterval = null;
@@ -108,7 +118,8 @@ async function submitForm() {
   resetSteps();
 
   try {
-    const resp = await fetch(`${BACKEND_URL}/api/generate?token=${SECRET_URL_TOKEN}`, {
+    const endpoint = TEST_MODE ? "/api/test" : "/api/generate";
+    const resp = await fetch(`${BACKEND_URL}${endpoint}?token=${SECRET_URL_TOKEN}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
