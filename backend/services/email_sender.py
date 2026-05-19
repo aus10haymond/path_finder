@@ -159,12 +159,13 @@ def _build_html(result: dict) -> str:
 </html>"""
 
 
-async def send_results_email(result: dict) -> None:
+async def send_results_email(result: dict, test_mode: bool = False) -> None:
     if not settings.sendgrid_api_key:
         logger.warning("SendGrid not configured — skipping email")
         return
 
-    if settings.test_mode:
+    effective_test = test_mode or settings.test_mode
+    if effective_test:
         recipient = settings.test_recipient_email
         if not recipient:
             logger.warning("TEST_RECIPIENT_EMAIL not configured — skipping email in test mode")
@@ -178,7 +179,7 @@ async def send_results_email(result: dict) -> None:
     city_count = result.get("city_count", 0)
     agent_count = result.get("agent_count", 0)
     subject = f"Your Insurance Agent List is Ready — {city_count} Cities, {agent_count} Agents"
-    if settings.test_mode:
+    if effective_test:
         subject = f"[TEST] {subject}"
 
     message = Mail(

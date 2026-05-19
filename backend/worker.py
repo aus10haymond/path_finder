@@ -12,7 +12,7 @@ from services.sheets import create_and_populate_sheet
 logger = logging.getLogger(__name__)
 
 
-async def run_job(job_id: str, request: GenerateRequest):
+async def run_job(job_id: str, request: GenerateRequest, test_mode: bool = False):
     try:
         await update_job(job_id, status="running", progress="Starting job...")
         logger.info("Job %s started", job_id)
@@ -42,7 +42,7 @@ async def run_job(job_id: str, request: GenerateRequest):
 
         # --- Phase 3: Google Sheets ---
         await update_job(job_id, progress="Writing to Google Sheets...")
-        sheet_url = await asyncio.to_thread(create_and_populate_sheet, agents, request.cities)
+        sheet_url = await asyncio.to_thread(create_and_populate_sheet, agents, request.cities, test_mode)
         logger.info("Sheet written: %s", sheet_url)
 
         # --- Phase 4b: route optimization ---
@@ -86,7 +86,7 @@ async def run_job(job_id: str, request: GenerateRequest):
         # --- Phase 5: email ---
         await update_job(job_id, progress="Sending email notification...")
         try:
-            await send_results_email(result)
+            await send_results_email(result, test_mode=test_mode)
         except Exception as e:
             logger.error("Email failed (job still complete): %s", e)
 

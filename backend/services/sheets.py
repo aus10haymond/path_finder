@@ -106,8 +106,8 @@ def build_sheet_url(spreadsheet_id: str) -> str:
     return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
 
 
-def create_and_populate_sheet(agents: list[dict], cities: list[str]) -> str:
-    if settings.test_mode:
+def create_and_populate_sheet(agents: list[dict], cities: list[str], test_mode: bool = False) -> str:
+    if test_mode or settings.test_mode:
         spreadsheet_id = settings.test_google_spreadsheet_id
         if not spreadsheet_id:
             raise RuntimeError(

@@ -12,6 +12,7 @@ from database import init_db
 from routes.generate import router as generate_router
 from routes.jobs import router as jobs_router
 from routes.status import router as status_router
+from routes.test_route import router as test_router
 from routes.ws import router as ws_router
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
@@ -39,6 +40,7 @@ app.add_middleware(
 app.include_router(generate_router)
 app.include_router(status_router)
 app.include_router(jobs_router)
+app.include_router(test_router)
 app.include_router(ws_router)
 
 
@@ -50,8 +52,9 @@ async def health():
 @app.get("/")
 async def root(request: Request):
     return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "app_token": settings.secret_url_token or ""},
+        request=request,
+        name="index.html",
+        context={"app_token": settings.secret_url_token or ""},
     )
 
 
