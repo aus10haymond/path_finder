@@ -1,5 +1,8 @@
 # path_finder Wiki Log
 
+## [2026-05-19] fix | Nominatim fallback for ORS geocoding misses
+ORS geocoding (`/geocode/search`) returned no results for valid US addresses (e.g. "1679 E Beretta Pl, Chandler, AZ 85286"), causing route optimization to abort. Added `_nominatim_geocode()` as a fallback: `geocode_address()` now tries ORS first, then Nominatim (OpenStreetMap) on a miss. A module-level `asyncio.Lock` serializes Nominatim calls with a 1-second gap to comply with Nominatim's usage policy. Fixes both start-address failures (which were fatal) and improves agent geocoding coverage (9 misses in the triggering run).
+
 ## [2026-05-19] feat | Test mode UI + README
 Added `?test=1` query-param support to `frontend/app.js`: when present, posts to `/api/test` instead of `/api/generate` and renders an amber "TEST MODE" banner. Token is still appended automatically. Created `README.md` at project root covering setup, env vars, test mode, and phase status.
 

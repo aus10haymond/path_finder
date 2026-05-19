@@ -10,14 +10,39 @@ logger = logging.getLogger(__name__)
 
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 ORS_OPTIMIZE_URL = "https://api.openrouteservice.org/optimization"
+NOMINATIM_GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_HEADERS = {"User-Agent": "path-finder-lead-tool/1.0"}
 
 BATCH_SIZE = 48          # ORS optimization limit per request
 CLUSTER_THRESHOLD = 150  # stop count that triggers geographic clustering
 STOPS_PER_CLUSTER = 40   # target cluster size (keeps each cluster under BATCH_SIZE)
 
 
+_nominatim_lock = asyncio.Lock()
+
+
+async def _nominatim_geocode(session: aiohttp.ClientSession, address: str) -> tuple[float, float] | None:
+    """Fallback geocoder using Nominatim (OpenStreetMap). Returns (lng, lat) or None.
+    Serializes requests with a 1-second gap to respect Nominatim's usage policy."""
+    async with _nominatim_lock:
+        try:
+            async with session.get(
+                NOMINATIM_GEOCODE_URL,
+                params={"q": address, "format": "json", "limit": 1},
+                headers=NOMINATIM_HEADERS,
+            ) as resp:
+                data = await resp.json()
+            await asyncio.sleep(1)
+            if not data:
+                return None
+            return float(data[0]["lon"]), float(data[0]["lat"])
+        except Exception as e:
+            logger.warning("Nominatim geocoding failed for '%s': %s", address, e)
+            return None
+
+
 async def geocode_address(session: aiohttp.ClientSession, address: str) -> tuple[float, float] | None:
-    """Returns (longitude, latitude) or None if geocoding fails."""
+    """Returns (longitude, latitude) or None if all geocoders fail. Tries ORS then Nominatim."""
     if not address.strip():
         return None
     try:
@@ -27,14 +52,17 @@ async def geocode_address(session: aiohttp.ClientSession, address: str) -> tuple
         ) as resp:
             data = await resp.json()
         features = data.get("features", [])
-        if not features:
-            logger.warning("No geocode result for: %s", address)
-            return None
-        coords = features[0]["geometry"]["coordinates"]  # [lng, lat]
-        return float(coords[0]), float(coords[1])
+        if features:
+            coords = features[0]["geometry"]["coordinates"]  # [lng, lat]
+            return float(coords[0]), float(coords[1])
+        logger.debug("ORS geocode miss for '%s', trying Nominatim", address)
     except Exception as e:
-        logger.warning("Geocoding failed for '%s': %s", address, e)
-        return None
+        logger.debug("ORS geocoding failed for '%s': %s — trying Nominatim", address, e)
+
+    coords = await _nominatim_geocode(session, address)
+    if coords is None:
+        logger.warning("No geocode result for: %s", address)
+    return coords
 
 
 async def _geocode_agent(session: aiohttp.ClientSession, semaphore: asyncio.Semaphore, agent: dict) -> None:
