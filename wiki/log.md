@@ -1,5 +1,8 @@
 # path_finder Wiki Log
 
+## [2026-05-19] fix | Google Maps links use configured start address as origin
+`worker.py` now includes `start_address` and `end_address` in the job result dict. `mapsLinks()` in `app.js` and `_maps_links()` in `email_sender.py` now prepend `start_address` to the first segment URL and append `end_address` to the last. Previously all Maps /dir/ links started from stop #1 instead of the user's configured starting point.
+
 ## [2026-05-19] fix | Suite/unit stripping for unresolvable addresses
 Added `_strip_suite()` as a third geocoding tier in `routing.py`. When both ORS and Nominatim fail on a full address, the function strips suite/unit designators (`Ste`, `Suite`, `STE`, `Bldg`, `Building`, `Unit`, `#`, etc.) via regex and retries Nominatim with the simplified street address. This resolved 13 misses in a 94-agent run — all were suite-qualified addresses in Gilbert and Mesa that Nominatim couldn't match verbatim but resolved cleanly at the street level.
 
