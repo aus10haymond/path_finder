@@ -30,31 +30,40 @@ def _maps_link(stops: list[dict]) -> str | None:
     return url
 
 
-def _maps_links(stops: list[dict]) -> list[str]:
+def _maps_links(stops: list[dict], start_address: str = "", end_address: str = "") -> list[str]:
     """
     Return one or more Google Maps /dir/ URLs covering all stops.
+    start_address is prepended to the first segment; end_address is appended to the last.
     For routes longer than _MAPS_SEGMENT, splits into overlapping segments
     (each segment shares its last stop with the next segment's first stop
     so the overall route is continuous).
-    Returns [] for fewer than 2 stops.
+    Returns [] for fewer than 1 stop.
     """
-    if len(stops) < 2:
+    if not stops:
+        return []
+    if len(stops) < 2 and not start_address and not end_address:
         return []
 
-    def _seg_url(chunk: list[dict]) -> str:
+    def _seg_url(chunk: list[dict], is_first: bool, is_last: bool) -> str:
         parts = [
             quote(f"{a.get('address', '')}, {a.get('city', '')}".strip(", "))
             for a in chunk
         ]
+        if is_first and start_address:
+            parts.insert(0, quote(start_address))
+        if is_last and end_address:
+            parts.append(quote(end_address))
         return f"https://www.google.com/maps/dir/{'/'.join(parts)}"
 
     if len(stops) <= _MAPS_SEGMENT:
-        return [_seg_url(stops)]
+        return [_seg_url(stops, True, True)]
 
     urls: list[str] = []
     i = 0
     while i < len(stops) - 1:
-        urls.append(_seg_url(stops[i: i + _MAPS_SEGMENT]))
+        chunk = stops[i: i + _MAPS_SEGMENT]
+        is_last = i + _MAPS_SEGMENT >= len(stops)
+        urls.append(_seg_url(chunk, i == 0, is_last))
         i += _MAPS_SEGMENT - 1
     return urls
 
@@ -66,11 +75,11 @@ def _format_duration(seconds: int) -> str:
     return f"{m}m"
 
 
-def _build_route_section(key: str, route: dict) -> str:
+def _build_route_section(key: str, route: dict, start_address: str = "", end_address: str = "") -> str:
     label = "All Cities Combined" if key == "all" else key
     stops = route.get("ordered_agents", [])
     duration = _format_duration(route.get("total_duration_seconds", 0))
-    urls = _maps_links(stops)
+    urls = _maps_links(stops, start_address, end_address)
 
     rows = ""
     for i, stop in enumerate(stops, 1):
@@ -124,7 +133,9 @@ def _build_html(result: dict) -> str:
         for c in cities
     )
 
-    route_sections = "".join(_build_route_section(k, v) for k, v in routes.items()) if routes else (
+    start_address = result.get("start_address", "")
+    end_address = result.get("end_address", "")
+    route_sections = "".join(_build_route_section(k, v, start_address, end_address) for k, v in routes.items()) if routes else (
         "<p style='color:#888;'>Route optimization was not run or did not return results.</p>"
     )
 

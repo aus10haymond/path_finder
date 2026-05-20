@@ -314,7 +314,7 @@ function showResults(result) {
       <div class="route-block">
         <h3>${label}</h3>
         <p class="route-meta">${route.stop_count} stops · Est. ${duration} driving</p>
-        ${mapsLinks(route.ordered_agents || [])}
+        ${mapsLinks(route.ordered_agents || [], result.start_address || "", result.end_address || "")}
         ${renderStopList(route.ordered_agents || [])}
       </div>`;
   });
@@ -329,24 +329,34 @@ function showResults(result) {
 // Google Maps deep-link generation — segments of up to 9 stops with 1-stop overlap
 const MAPS_SEGMENT = 9;
 
-function mapsLinks(stops) {
-  if (stops.length < 2) return "";
+function mapsLinks(stops, startAddress = "", endAddress = "") {
+  if (stops.length < 1) return "";
 
-  function segUrl(chunk) {
-    const parts = chunk.map(s => encodeURIComponent(`${s.address}, ${s.city}`));
+  function addrStr(s) { return encodeURIComponent(`${s.address}, ${s.city}`); }
+
+  function segUrl(chunk, isFirst, isLast) {
+    const parts = chunk.map(addrStr);
+    if (isFirst && startAddress) parts.unshift(encodeURIComponent(startAddress));
+    if (isLast && endAddress) parts.push(encodeURIComponent(endAddress));
     return `https://www.google.com/maps/dir/${parts.join("/")}`;
   }
 
   if (stops.length <= MAPS_SEGMENT) {
-    return `<div class="maps-links"><a href="${segUrl(stops)}" target="_blank" rel="noopener" class="btn-maps">Open in Google Maps</a></div>`;
+    return `<div class="maps-links"><a href="${segUrl(stops, true, true)}" target="_blank" rel="noopener" class="btn-maps">Open in Google Maps</a></div>`;
   }
 
   // Overlapping segments so route is continuous across chunks
   let html = '<div class="maps-links">';
-  for (let i = 0; i < stops.length - 1; i += MAPS_SEGMENT - 1) {
+  let i = 0;
+  let segIndex = 0;
+  while (i < stops.length - 1) {
     const chunk = stops.slice(i, i + MAPS_SEGMENT);
     const to = Math.min(i + MAPS_SEGMENT, stops.length);
-    html += `<a href="${segUrl(chunk)}" target="_blank" rel="noopener" class="btn-maps">Maps: stops ${i + 1}–${to}</a>`;
+    const isFirst = segIndex === 0;
+    const isLast = to >= stops.length;
+    html += `<a href="${segUrl(chunk, isFirst, isLast)}" target="_blank" rel="noopener" class="btn-maps">Maps: stops ${i + 1}–${to}</a>`;
+    i += MAPS_SEGMENT - 1;
+    segIndex++;
   }
   return html + "</div>";
 }

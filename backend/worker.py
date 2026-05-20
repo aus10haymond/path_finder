@@ -81,6 +81,8 @@ async def run_job(job_id: str, request: GenerateRequest, test_mode: bool = False
             "failed_cities": failed_cities,
             "routes": route_summary,
             "route_warning": route_warning,
+            "start_address": request.start_address,
+            "end_address": request.end_address,
         }
 
         # --- Phase 5: email ---
